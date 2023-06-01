@@ -2,6 +2,7 @@ const express=require('express')
 const cors = require('cors');
 require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const jwt=require('jsonwebtoken')
 
 
 const port=process.env.PORT||5000;
@@ -10,6 +11,21 @@ const app=express()
 // middleware
 app.use(cors())
 app.use(express.json())
+
+const verifyToken=(req,res,next)=>{
+  const authorization=req.headers.authorization
+  if(!authorization){
+    return res.status(401).send({error:true, message:'unauthorized access'})
+  }
+  const token=authorization.split(' ')[1]
+  jwt.verify(token, process.env.ACCESS_TOKEN, (err,decoded)=>{
+    if(err){
+      return res.status(401).send({error:true, message:'token expired'})
+    }
+    req.decoded=decoded
+    next()
+  })
+}
 
 
 
@@ -37,7 +53,7 @@ async function run() {
      
     
     // jwt related 
-    app.post('jwt',(req,res)=>{
+    app.post('/jwt',(req,res)=>{
       const user=req.body
       const token=jwt.sign(user,process.env.ACCESS_TOKEN,{expiresIn:'2h'})
       res.send({token})
@@ -131,7 +147,7 @@ app.patch('/user/:id',async(req,res)=>{
   const filter={_id:new ObjectId(req.params.id)}
   const updateUser={
     $set:{
-      isAdmin:true
+      role:'admin'
     }
   }
   const result=await userCollecations.updateOne(filter,updateUser)
@@ -152,8 +168,11 @@ app.get('/reviews', async(req,res)=>{
 })
 
 // cart related 
-app.get('/cart',async(req,res)=>{
+app.get('/cart',verifyToken, async(req,res)=>{
   const email=req?.query?.email
+  if(req.decoded.email!==email){
+    return res.status(403).send('forbidden access')
+  }
   if(!email){
    res.send([])
   }
@@ -162,7 +181,7 @@ app.get('/cart',async(req,res)=>{
   res.send(result)
 })
 
-app.post('/cart',async(req,res)=>{
+app.post('/cart', async(req,res)=>{
   const user=req.query.email
   const name=req.query.name
   const price=parseFloat(req.query.price)
