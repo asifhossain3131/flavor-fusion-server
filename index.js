@@ -59,6 +59,16 @@ async function run() {
       res.send({token})
     })
 
+    const verifyAdmin=async (req,res,next)=>{
+      const email=req.decoded.email
+      const filter={email:email}
+      const user=await userCollecations.findOne(filter)
+      if(user?.role!=='admin'){
+        return res.status(403).send({error:true, message:'forbidden access'})
+      }
+      next()
+    }
+
 //  category related 
 app.get('/categories',async(req,res)=>{
     const result=await categoryCollections.find().toArray()
@@ -127,8 +137,19 @@ app.delete('/menu/:id',async(req,res)=>{
 })
 
 // user related 
-app.get('/users',async(req,res)=>{
+app.get('/users',verifyToken, verifyAdmin, async(req,res)=>{
   const result=await userCollecations.find().toArray()
+  res.send(result)
+})
+
+app.get('/users/admin/:email', verifyToken, async(req,res)=>{
+  const email=req.params.email
+  const filter={email: email}
+  const user=await userCollecations.findOne(filter)
+  if(req.decoded.email!==email){
+    return res.send({admin:false})
+  }
+  const result={admin: user?.role==='admin'}
   res.send(result)
 })
 
@@ -170,12 +191,15 @@ app.get('/reviews', async(req,res)=>{
 // cart related 
 app.get('/cart',verifyToken, async(req,res)=>{
   const email=req?.query?.email
-  if(req.decoded.email!==email){
-    return res.status(403).send('forbidden access')
-  }
+
   if(!email){
    res.send([])
   }
+
+  if(req.decoded.email!==email){
+    return res.status(403).send('forbidden access')
+  }
+  
   const query={user:email}
   const result=await cartCollections.find(query).toArray()
   res.send(result)
