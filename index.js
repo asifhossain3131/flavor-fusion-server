@@ -129,7 +129,7 @@ app.put('/menu/:id',async(req,res)=>{
   res.send(result)
 })
 
-app.delete('/menu/:id',async(req,res)=>{
+app.delete('/menu/:id',verifyToken,verifyAdmin, async(req,res)=>{
   const id=req.params.id
   const filter={_id:new ObjectId(id)}
   const result=await menuCollections.deleteOne(filter)
