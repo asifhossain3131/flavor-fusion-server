@@ -3,10 +3,16 @@ const cors = require('cors');
 require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const jwt=require('jsonwebtoken')
+const SSLCommerzPayment = require('sslcommerz-lts')
 
 
 const port=process.env.PORT||5000;
 const app=express()
+
+const store_id = process.env.STORE_ID
+const store_passwd = process.env.STORE_PASS
+const is_live = false
+
 
 // middleware
 app.use(cors())
@@ -50,6 +56,7 @@ async function run() {
     const cartCollections=client.db('flavorFusion').collection('cart')
     const categoryDetailCollections=client.db('flavorFusion').collection('categoryDetail')
     const userCollecations=client.db('flavorFusion').collection('users')
+    const paymentCollectons=client.db('flavorFusion').collection('payment')
      
     
     // jwt related 
@@ -122,6 +129,7 @@ app.put('/menu/:id',async(req,res)=>{
   const options={upsert:true}
   const updatedFood={
     $set:{
+      price:newUpdate.price
 
     }
   }
@@ -249,6 +257,71 @@ app.get('/categoryDetail',async(req,res)=>{
   res.send(result)
 })
 
+// payment related 
+app.post('/order/:email',verifyToken, async(req,res)=>{
+  const email=req.params.email
+  const matchedCart=await cartCollections.findOne({user:email})
+  const orderedProducts=matchedCart?.items
+  const foods=orderedProducts.map(food=>food.name)
+  const total=orderedProducts.reduce((sum,price)=>price.total+sum,0)
+  const tansId=new ObjectId().toString()
+
+  const data = {
+    total_amount: total,
+    currency: 'BDT',
+    tran_id: tansId, // use unique tran_id for each api call
+    success_url: `http://localhost:5000/orderCompleted/${tansId}`,
+    fail_url: 'http://localhost:3030/fail',
+    cancel_url: 'http://localhost:3030/cancel',
+    ipn_url: 'http://localhost:3030/ipn',
+    shipping_method: 'Courier',
+    product_name: 'alu',
+    product_category: 'Electronic',
+    product_profile: 'general',
+    cus_name: 'Customer Name',
+    cus_email: email,
+    cus_add1: 'Dhaka',
+    cus_add2: 'Dhaka',
+    cus_city: 'Dhaka',
+    cus_state: 'Dhaka',
+    cus_postcode: '1000',
+    cus_country: 'Bangladesh',
+    cus_phone: '01711111111',
+    cus_fax: '01711111111',
+    ship_name: 'Customer Name',
+    ship_add1: 'Dhaka',
+    ship_add2: 'Dhaka',
+    ship_city: 'Dhaka',
+    ship_state: 'Dhaka',
+    ship_postcode: 1000,
+    ship_country: 'Bangladesh',
+};
+const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
+sslcz.init(data).then(apiResponse => {
+    // Redirect the user to payment gateway
+    let GatewayPageURL = apiResponse.GatewayPageURL
+    res.send({url:GatewayPageURL})
+  });
+  const finalOrder={
+    orderedProducts:foods,
+    tansId,
+    total:total,
+   status:'processing'
+  }
+  const result=await paymentCollectons.insertOne(finalOrder)
+})
+
+app.post('/orderCompleted/:transId',async(req,res)=>{
+  const transId=req.params.transId
+   const updatedStatus=await paymentCollectons.updateOne({tansId:transId},{
+    $set:{
+      status:'Completed'
+    }
+   },{upsert:true})
+   if(updatedStatus.modifiedCount>0){
+    res.redirect(`http://localhost:5173/dashboard/paymentSuccess/${transId}`)
+   }
+})
 
  // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
