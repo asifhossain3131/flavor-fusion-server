@@ -57,6 +57,7 @@ async function run() {
     const categoryDetailCollections=client.db('flavorFusion').collection('categoryDetail')
     const userCollecations=client.db('flavorFusion').collection('users')
     const paymentCollectons=client.db('flavorFusion').collection('payment')
+    const deliveredCollections=client.db('flavorFusion').collection('delivered')
      
     
     // jwt related 
@@ -258,19 +259,29 @@ app.get('/categoryDetail',async(req,res)=>{
 })
 
 // payment related 
+app.get('/orderedFoods', verifyToken,verifyAdmin, async(req,res)=>{
+  const result=await paymentCollectons.find().toArray()
+  res.send(result)
+})
+
+app.get('/orderedFood/:transId',async(req,res)=>{
+  const result=await paymentCollectons.findOne({transId:req.params.transId})
+  res.send(result)
+})
+
 app.post('/order/:email',verifyToken, async(req,res)=>{
   const email=req.params.email
   const matchedCart=await cartCollections.findOne({user:email})
   const orderedProducts=matchedCart?.items
   const foods=orderedProducts.map(food=>food.name)
   const total=orderedProducts.reduce((sum,price)=>price.total+sum,0)
-  const tansId=new ObjectId().toString()
+  const transId=new ObjectId().toString()
 
   const data = {
     total_amount: total,
     currency: 'BDT',
-    tran_id: tansId, // use unique tran_id for each api call
-    success_url: `http://localhost:5000/orderCompleted/${tansId}`,
+    tran_id: transId, // use unique tran_id for each api call
+    success_url: `http://localhost:5000/orderCompleted/${transId}?email=${email}`,
     fail_url: 'http://localhost:3030/fail',
     cancel_url: 'http://localhost:3030/cancel',
     ipn_url: 'http://localhost:3030/ipn',
@@ -302,25 +313,50 @@ sslcz.init(data).then(apiResponse => {
     let GatewayPageURL = apiResponse.GatewayPageURL
     res.send({url:GatewayPageURL})
   });
+
   const finalOrder={
-    orderedProducts:foods,
-    tansId,
-    total:total,
-   status:'processing'
+    email,orderedProducts,transId,status:'pending',date:new Date()
   }
   const result=await paymentCollectons.insertOne(finalOrder)
 })
 
 app.post('/orderCompleted/:transId',async(req,res)=>{
   const transId=req.params.transId
-   const updatedStatus=await paymentCollectons.updateOne({tansId:transId},{
+  const email=req.query.email
+   const updatedStatus=await paymentCollectons.updateOne({transId:transId},{
     $set:{
       status:'Completed'
     }
    },{upsert:true})
    if(updatedStatus.modifiedCount>0){
+    const cartItems=await cartCollections.findOne({user:email})
+    const result=await cartCollections.deleteOne(cartItems)
     res.redirect(`http://localhost:5173/dashboard/paymentSuccess/${transId}`)
    }
+
+})
+
+// deliverd food related 
+app.get('/deliveredFood',async(req,res)=>{
+  const result=await deliveredCollections.find().toArray()
+  res.send(result)
+})
+
+app.post('/deliveredFood/:transId',async(req,res)=>{
+  const transId=req.params.transId
+  const updatedStatus=await paymentCollectons.updateOne({transId:transId},{
+    $set:{
+      status:'delivered'
+    }
+  },{upsert:true})
+  if(updatedStatus.modifiedCount>0){
+    const target=await paymentCollectons.findOne({transId:transId})
+    const newDelivered=await deliveredCollections.insertOne(target)
+    if(newDelivered.insertedId>0){
+      const result=await paymentCollectons.deleteOne(target)
+      res.send(result)
+    }
+  }
 })
 
  // Send a ping to confirm a successful connection
