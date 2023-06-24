@@ -4,7 +4,8 @@ require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const jwt=require('jsonwebtoken')
 const SSLCommerzPayment = require('sslcommerz-lts')
-
+const moment=require('moment')
+const nodemailer=require('nodemailer')
 
 const port=process.env.PORT||5000;
 const app=express()
@@ -34,6 +35,35 @@ const verifyToken=(req,res,next)=>{
 }
 
 
+const sendEmail=(emailMessage, emailAddress)=>{
+ const transporter=nodemailer.createTransport({
+  service:'gmail',
+  auth:{
+    user:process.env.EMAIL,
+    pass:process.env.EMAIL_PASS
+  }
+ })
+ transporter.verify(function(error,success){
+  if(error){
+    console.log(error)
+  }
+  else{console.log('server is ready to take email')}
+ })
+ const mailOptions={
+  from: process.env.EMAIL,
+  to:emailAddress,
+  subject:emailMessage?.subject,
+  html:`<p>${emailMessage.body}</p>`
+ }
+ transporter.sendMail(mailOptions, function (error, info) {
+  if (error) {
+    console.log(error)
+  } else {
+    console.log('Email sent: ' + info.response)
+  }
+})
+}
+
 
 const uri = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_KEY}@cluster0.df7drrh.mongodb.net/?retryWrites=true&w=majority`;
 
@@ -49,7 +79,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     const categoryCollections=client.db('flavorFusion').collection('category')
     const menuCollections=client.db('flavorFusion').collection('menu')
     const customerReviewCollections=client.db('flavorFusion').collection('customerReview')
@@ -58,6 +88,8 @@ async function run() {
     const userCollecations=client.db('flavorFusion').collection('users')
     const paymentCollectons=client.db('flavorFusion').collection('payment')
     const deliveredCollections=client.db('flavorFusion').collection('delivered')
+    const latestNewsCollections=client.db('flavorFusion').collection('latestNews')
+    const reservationCollections=client.db('flavorFusion').collection('reservations')
      
     
     // jwt related 
@@ -315,7 +347,7 @@ sslcz.init(data).then(apiResponse => {
   });
 
   const finalOrder={
-    email,orderedProducts,transId,status:'pending',date:new Date()
+    email,orderedProducts,transId,status:'pending',date:moment().format('LLL')
   }
   const result=await paymentCollectons.insertOne(finalOrder)
 })
@@ -331,6 +363,14 @@ app.post('/orderCompleted/:transId',async(req,res)=>{
    if(updatedStatus.modifiedCount>0){
     const cartItems=await cartCollections.findOne({user:email})
     const result=await cartCollections.deleteOne(cartItems)
+    sendEmail({
+      subject:'Your food ordered has been placed sucessfully',
+      body:`Transaction ID ${transId} placed successfully. Hope you will get your parcel very shortly`
+    }, email)
+    sendEmail({
+      subject:'New Food has been placed',
+      body:`Transaction ID ${transId} ordered foods. Please check the list to deliver the parcel shortly`
+    }, 'changemakers789@gmail.com')
     res.redirect(`http://localhost:5173/dashboard/paymentSuccess/${transId}`)
    }
 
@@ -342,7 +382,13 @@ app.get('/deliveredFood',async(req,res)=>{
   res.send(result)
 })
 
-app.post('/deliveredFood/:transId',async(req,res)=>{
+app.get('/deliveredFood/:email',verifyToken, async(req,res)=>{
+  const email=req.params.email
+  const result=await deliveredCollections.find({email:email}).toArray()
+  res.send(result)
+})
+
+app.post('/deliveredFood/:transId',verifyToken,verifyAdmin, async(req,res)=>{
   const transId=req.params.transId
   const updatedStatus=await paymentCollectons.updateOne({transId:transId},{
     $set:{
@@ -352,12 +398,33 @@ app.post('/deliveredFood/:transId',async(req,res)=>{
   if(updatedStatus.modifiedCount>0){
     const target=await paymentCollectons.findOne({transId:transId})
     const newDelivered=await deliveredCollections.insertOne(target)
-    if(newDelivered.insertedId>0){
-      const result=await paymentCollectons.deleteOne(target)
+    if(newDelivered.acknowledged===true){
+      const result=await paymentCollectons.deleteOne({transId:transId})
       res.send(result)
     }
   }
 })
+
+// latest news related 
+app.get('/latestnews', async(req,res)=>{
+  const id=req.query.id
+  let result
+  if(id){
+   result= await latestNewsCollections.findOne({_id:new ObjectId(id)})
+  }
+  else{
+    result= await latestNewsCollections.find().toArray()
+  }
+  res.send(result)
+})
+
+// reservation related 
+app.post('/reservations',verifyToken, async(req,res)=>{
+  const reservationInfo=req.body
+  const result=await reservationCollections.insertOne(reservationInfo)
+  res.send(result)
+})
+
 
  // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
